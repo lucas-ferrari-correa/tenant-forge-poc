@@ -1,0 +1,28 @@
+{
+  "name": "tenant-forge",
+  "private": true,
+  "version": "0.0.0",
+  "description": "POC multi-tenant ORM (Prisma-like) — engine, CLI, SDK, and visual editor",
+  "packageManager": "pnpm@10.17.1",
+  "scripts": {
+    "build": "pnpm -r --filter @tenant-forge/core --filter @tenant-forge/cli --filter @tenant-forge/sdk --filter @tenant-forge/web run build",
+    "build:core": "pnpm --filter @tenant-forge/core run build",
+    "build:cli": "pnpm --filter @tenant-forge/cli run build",
+    "build:sdk": "pnpm --filter @tenant-forge/sdk run build",
+    "build:web": "pnpm --filter @tenant-forge/web run build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "typecheck": "pnpm -r run typecheck"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.2.4",
+    "@types/node": "^22.18.0",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
