@@ -8,6 +8,7 @@ export function coreVersion(): string {
 export * from './adapters/index.js'
 export * from './ast/index.js'
 export { CONTAINER_IMAGES, type SupportedDatabase } from './containers.js'
+export * from './diff/index.js'
 export * from './dsl/index.js'
 export * from './pull/index.js'
 export * from './push/index.js'
