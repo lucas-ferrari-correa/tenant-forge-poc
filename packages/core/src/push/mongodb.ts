@@ -1,7 +1,7 @@
 import { MongoClient } from 'mongodb'
 import type { EntityDefinition } from '../ast/types.js'
 import { SchemaPushError } from './errors.js'
-import { assertSafeIdent, tenantNamespace } from './naming.js'
+import { assertSafeIdent, siloNamespace, tenantNamespace } from './naming.js'
 import { entitiesForModel } from './plan.js'
 import type { SchemaPushCreatedObject, SchemaPushPlan, SchemaPushResult } from './types.js'
 
@@ -46,7 +46,7 @@ async function ensureCollection(
 
 /**
  * Forward-engineer MongoDB layout from a push plan.
- * Bridge/silo both use database ≈ namespace (`tenant_${slug}`), matching the adapter.
+ * Bridge → database `tenant_${slug}`; silo → database `silo_${slug}` (distinct namespaces).
  * No FK constraints — relations degrade to documented warnings.
  */
 export async function pushMongodbSchema(
@@ -84,20 +84,29 @@ export async function pushMongodbSchema(
       await ensureCollection(client, defaultDb, entity, 'global', created)
     }
 
-    // Bridge + silo share tenant_${slug} database names (adapter convention).
+    // Bridge → database `tenant_${slug}`; silo → database `silo_${slug}` (distinct).
     for (const tenantId of plan.tenants) {
-      const databaseName = tenantNamespace(tenantId)
-      created.push({
-        kind: 'database',
-        name: databaseName,
-        tenancyModel: bridgeEntities.length > 0 ? 'shared-db-isolated-schema' : 'single-tenant',
-      })
-
-      for (const entity of bridgeEntities) {
-        await ensureCollection(client, databaseName, entity, 'shared-db-isolated-schema', created)
+      if (bridgeEntities.length > 0) {
+        const databaseName = tenantNamespace(tenantId)
+        created.push({
+          kind: 'database',
+          name: databaseName,
+          tenancyModel: 'shared-db-isolated-schema',
+        })
+        for (const entity of bridgeEntities) {
+          await ensureCollection(client, databaseName, entity, 'shared-db-isolated-schema', created)
+        }
       }
-      for (const entity of siloEntities) {
-        await ensureCollection(client, databaseName, entity, 'single-tenant', created)
+      if (siloEntities.length > 0) {
+        const databaseName = siloNamespace(tenantId)
+        created.push({
+          kind: 'database',
+          name: databaseName,
+          tenancyModel: 'single-tenant',
+        })
+        for (const entity of siloEntities) {
+          await ensureCollection(client, databaseName, entity, 'single-tenant', created)
+        }
       }
     }
   } catch (error) {

@@ -7,7 +7,12 @@ export {
   type SqlDialect,
 } from './ddl.js'
 export { SchemaPushError, type SchemaPushErrorCode } from './errors.js'
-export { assertSafeIdent, sanitizeTenantIdentifier, tenantNamespace } from './naming.js'
+export {
+  assertSafeIdent,
+  sanitizeTenantIdentifier,
+  siloNamespace,
+  tenantNamespace,
+} from './naming.js'
 export { buildPushPlan, entitiesForModel } from './plan.js'
 export { createSchemaPusher, pushSchema, type SchemaPusher } from './push.js'
 export type {

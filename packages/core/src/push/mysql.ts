@@ -8,7 +8,7 @@ import {
   relationsWithForeignKeys,
 } from './ddl.js'
 import { SchemaPushError } from './errors.js'
-import { assertSafeIdent, tenantNamespace } from './naming.js'
+import { assertSafeIdent, siloNamespace, tenantNamespace } from './naming.js'
 import { entitiesForModel } from './plan.js'
 import type { SchemaPushCreatedObject, SchemaPushPlan, SchemaPushResult } from './types.js'
 
@@ -134,26 +134,8 @@ export async function pushMysqlSchema(
   const siloEntities = entitiesForModel(plan, 'single-tenant').map((e) => e.entity)
   const globalEntities = entitiesForModel(plan, 'global').map((e) => e.entity)
 
-  // MySQL: bridge and silo both use database-per-tenant naming (`tenant_${slug}`).
-  // When both models appear (hybrid), they share the same DB names — tables coexist.
-  const namespaceTenants = new Set<string>()
-  if (bridgeEntities.length > 0 || siloEntities.length > 0) {
-    for (const tenantId of plan.tenants) {
-      namespaceTenants.add(tenantNamespace(tenantId))
-    }
-  }
-
+  // MySQL: bridge → database `tenant_${slug}`; silo → database `silo_${slug}` (distinct).
   await withConnection(connectionString, async (connection) => {
-    for (const databaseName of namespaceTenants) {
-      const model =
-        bridgeEntities.length > 0 && siloEntities.length > 0
-          ? undefined
-          : bridgeEntities.length > 0
-            ? 'shared-db-isolated-schema'
-            : 'single-tenant'
-      await ensureDatabase(connection, databaseName, created, model)
-    }
-
     for (const entity of poolEntities) {
       await createEntityTable(connection, entity, {
         model: 'shared-db-shared-schema',
@@ -175,15 +157,16 @@ export async function pushMysqlSchema(
     )
 
     for (const tenantId of plan.tenants) {
-      const databaseName = tenantNamespace(tenantId)
-      for (const entity of bridgeEntities) {
-        await createEntityTable(connection, entity, {
-          database: databaseName,
-          model: 'shared-db-isolated-schema',
-          created,
-        })
-      }
       if (bridgeEntities.length > 0) {
+        const databaseName = tenantNamespace(tenantId)
+        await ensureDatabase(connection, databaseName, created, 'shared-db-isolated-schema')
+        for (const entity of bridgeEntities) {
+          await createEntityTable(connection, entity, {
+            database: databaseName,
+            model: 'shared-db-isolated-schema',
+            created,
+          })
+        }
         await addForeignKeys(
           connection,
           bridgeEntities,
@@ -192,14 +175,16 @@ export async function pushMysqlSchema(
           warnings,
         )
       }
-      for (const entity of siloEntities) {
-        await createEntityTable(connection, entity, {
-          database: databaseName,
-          model: 'single-tenant',
-          created,
-        })
-      }
       if (siloEntities.length > 0) {
+        const databaseName = siloNamespace(tenantId)
+        await ensureDatabase(connection, databaseName, created, 'single-tenant')
+        for (const entity of siloEntities) {
+          await createEntityTable(connection, entity, {
+            database: databaseName,
+            model: 'single-tenant',
+            created,
+          })
+        }
         await addForeignKeys(
           connection,
           siloEntities,

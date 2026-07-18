@@ -2,6 +2,7 @@ import { type Document, MongoClient } from 'mongodb'
 import {
   type CatalogObject,
   type CatalogSnapshot,
+  DEFAULT_SILO_NAMESPACE_PATTERN,
   DEFAULT_TENANT_NAMESPACE_PATTERN,
   isTenantNamespace,
 } from './catalog.js'
@@ -128,15 +129,15 @@ async function listCollections(
 }
 
 /**
- * Introspect MongoDB: default DB + tenant_* databases.
+ * Introspect MongoDB: default DB + tenant_* (bridge) + silo_* (silo) databases.
  * No FK inference. Empty collections rely on indexes + synthesized id.
- * Bridge×silo ambiguous — requires assumeTenancy/entityTenancy.
  */
 export async function introspectMongodbCatalog(
   connectionString: string,
   options?: SchemaPullOptions,
 ): Promise<CatalogSnapshot> {
   const pattern = options?.tenantNamespacePattern ?? DEFAULT_TENANT_NAMESPACE_PATTERN
+  const siloPattern = options?.siloNamespacePattern ?? DEFAULT_SILO_NAMESPACE_PATTERN
   const defaultNamespace = defaultDatabaseFromUri(connectionString)
   const client = new MongoClient(connectionString)
 
@@ -144,14 +145,12 @@ export async function introspectMongodbCatalog(
     await client.connect()
     const admin = client.db().admin()
     const { databases } = await admin.listDatabases()
-    const tenantDatabases = databases
+    const userDatabases = databases
       .map((db) => db.name)
-      .filter(
-        (name) =>
-          !SYSTEM_DATABASES.has(name) &&
-          isTenantNamespace(name, pattern) &&
-          name !== defaultNamespace,
-      )
+      .filter((name) => !SYSTEM_DATABASES.has(name) && name !== defaultNamespace)
+    const tenantDatabases = userDatabases.filter((name) => isTenantNamespace(name, pattern)).sort()
+    const siloDatabases = userDatabases
+      .filter((name) => isTenantNamespace(name, siloPattern))
       .sort()
 
     const objects: CatalogObject[] = []
@@ -160,13 +159,16 @@ export async function introspectMongodbCatalog(
     for (const databaseName of tenantDatabases) {
       objects.push(...(await listCollections(client, databaseName, 'tenant-database')))
     }
+    for (const databaseName of siloDatabases) {
+      objects.push(...(await listCollections(client, databaseName, 'silo-database')))
+    }
 
     return {
       dialect: 'mongodb',
       defaultNamespace,
       objects,
       tenantSchemas: [],
-      tenantDatabases,
+      tenantDatabases: [...tenantDatabases, ...siloDatabases],
     }
   } catch (error) {
     if (error instanceof SchemaPullError) {

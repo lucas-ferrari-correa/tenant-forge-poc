@@ -142,7 +142,7 @@ describe('schema push — postgres (testcontainers)', () => {
     expect(result.created.some((o) => o.kind === 'table' && o.name === 'Task')).toBe(true)
     expect(result.created.some((o) => o.kind === 'rls' && o.name === 'Task')).toBe(true)
     expect(result.created.some((o) => o.kind === 'schema' && o.name === 'tenant_acme')).toBe(true)
-    expect(result.created.some((o) => o.kind === 'database' && o.name === 'tenant_acme')).toBe(true)
+    expect(result.created.some((o) => o.kind === 'database' && o.name === 'silo_acme')).toBe(true)
     expect(result.created.some((o) => o.kind === 'table' && o.name === 'Country')).toBe(true)
 
     // Catalog: pool table + RLS
@@ -176,7 +176,7 @@ describe('schema push — postgres (testcontainers)', () => {
 
     // Silo catalog
     const siloUrl = new URL(connectionString)
-    siloUrl.pathname = '/tenant_acme'
+    siloUrl.pathname = '/silo_acme'
     const silo = new Client({ connectionString: siloUrl.toString() })
     await silo.connect()
     try {
@@ -314,6 +314,7 @@ describe('schema push — mysql (testcontainers)', () => {
     expect(result.dialect).toBe('mysql')
     expect(result.created.some((o) => o.kind === 'table' && o.name === 'Task')).toBe(true)
     expect(result.created.some((o) => o.kind === 'database' && o.name === 'tenant_acme')).toBe(true)
+    expect(result.created.some((o) => o.kind === 'database' && o.name === 'silo_acme')).toBe(true)
 
     const connection = await mysql.createConnection(connectionString)
     try {
@@ -327,12 +328,15 @@ describe('schema push — mysql (testcontainers)', () => {
 
       const [bridgeTables] = await connection.query(
         `SELECT TABLE_NAME AS name FROM information_schema.TABLES
-         WHERE TABLE_SCHEMA = 'tenant_acme' AND TABLE_NAME IN ('Note', 'Ledger')`,
+         WHERE TABLE_SCHEMA = 'tenant_acme' AND TABLE_NAME = 'Note'`,
       )
-      expect((bridgeTables as Array<{ name: string }>).map((r) => r.name).sort()).toEqual([
-        'Ledger',
-        'Note',
-      ])
+      expect((bridgeTables as Array<{ name: string }>).map((r) => r.name)).toEqual(['Note'])
+
+      const [siloTables] = await connection.query(
+        `SELECT TABLE_NAME AS name FROM information_schema.TABLES
+         WHERE TABLE_SCHEMA = 'silo_acme' AND TABLE_NAME = 'Ledger'`,
+      )
+      expect((siloTables as Array<{ name: string }>).map((r) => r.name)).toEqual(['Ledger'])
     } finally {
       await connection.end()
     }
@@ -458,8 +462,10 @@ describe('schema push — mongodb (testcontainers)', () => {
       expect(defaultNames).toEqual(expect.arrayContaining(['Country', 'Task']))
 
       const tenantCols = await client.db('tenant_acme').listCollections().toArray()
-      const tenantNames = tenantCols.map((c) => c.name).sort()
-      expect(tenantNames).toEqual(expect.arrayContaining(['Ledger', 'Note']))
+      expect(tenantCols.map((c) => c.name)).toEqual(expect.arrayContaining(['Note']))
+
+      const siloCols = await client.db('silo_acme').listCollections().toArray()
+      expect(siloCols.map((c) => c.name)).toEqual(expect.arrayContaining(['Ledger']))
 
       const indexes = await client.db(MONGO_DB).collection('Task').indexes()
       expect(indexes.some((idx) => idx.name === 'Task_tenant_id_idx')).toBe(true)

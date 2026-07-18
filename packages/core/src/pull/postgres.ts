@@ -3,6 +3,7 @@ import {
   type CatalogForeignKey,
   type CatalogObject,
   type CatalogSnapshot,
+  DEFAULT_SILO_NAMESPACE_PATTERN,
   DEFAULT_TENANT_NAMESPACE_PATTERN,
   isTenantNamespace,
 } from './catalog.js'
@@ -245,13 +246,14 @@ async function introspectSchemaTables(
 }
 
 /**
- * Introspect Postgres: public + tenant_* schemas in connection DB, plus tenant_* databases.
+ * Introspect Postgres: public + tenant_* schemas in connection DB, plus silo_* databases.
  */
 export async function introspectPostgresCatalog(
   connectionString: string,
   options?: SchemaPullOptions,
 ): Promise<CatalogSnapshot> {
   const pattern = options?.tenantNamespacePattern ?? DEFAULT_TENANT_NAMESPACE_PATTERN
+  const siloPattern = options?.siloNamespacePattern ?? DEFAULT_SILO_NAMESPACE_PATTERN
   const rlsSessionVar = options?.rlsSessionVar ?? 'app.current_tenant_id'
   const defaultNamespace = 'public'
   const defaultDb = defaultDatabaseFromUri(connectionString)
@@ -260,6 +262,9 @@ export async function introspectPostgresCatalog(
     return await withClient(connectionString, async (client) => {
       const { tenant: tenantSchemas } = await listUserSchemas(client, pattern)
       const tenantDatabases = (await listTenantDatabases(client, pattern)).filter(
+        (name) => name !== defaultDb,
+      )
+      const siloDatabases = (await listTenantDatabases(client, siloPattern)).filter(
         (name) => name !== defaultDb,
       )
 
@@ -277,18 +282,18 @@ export async function introspectPostgresCatalog(
         )
       }
 
-      // Silo: tenant_* databases (public schema of each)
-      for (const databaseName of tenantDatabases) {
+      // Silo: silo_* databases (public schema of each)
+      for (const databaseName of siloDatabases) {
         const siloObjects = await withClient(
           rewriteDatabase(connectionString, databaseName),
           async (siloClient) =>
-            introspectSchemaTables(siloClient, 'public', 'tenant-database', rlsSessionVar),
+            introspectSchemaTables(siloClient, 'public', 'silo-database', rlsSessionVar),
         )
         for (const object of siloObjects) {
           objects.push({
             ...object,
             namespace: databaseName,
-            namespaceKind: 'tenant-database',
+            namespaceKind: 'silo-database',
           })
         }
       }
@@ -298,7 +303,7 @@ export async function introspectPostgresCatalog(
         defaultNamespace,
         objects,
         tenantSchemas,
-        tenantDatabases,
+        tenantDatabases: [...tenantDatabases, ...siloDatabases],
       }
     })
   } catch (error) {

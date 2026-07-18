@@ -5,7 +5,7 @@ import { TENANT_ID_FIELD_NAME } from '../ast/tenancy.js'
 import { createTenantContext } from '../ast/tenant-context.js'
 import type { EntityDefinition, SchemaAst } from '../ast/types.js'
 import { quoteSqlIdent } from '../push/ddl.js'
-import { tenantNamespace } from '../push/naming.js'
+import { siloNamespace, tenantNamespace } from '../push/naming.js'
 import { buildQuery } from '../query/build.js'
 import { TenancyMigrateError } from './errors.js'
 import { destinationFieldNames, projectRow, sourceFieldNames } from './rows.js'
@@ -36,10 +36,7 @@ function findEntity(ast: SchemaAst, name: string): EntityDefinition {
   return entity
 }
 
-/**
- * MySQL: pool/global → default DB; bridge AND silo → database `tenant_${slug}`
- * (gap: bridge×silo share the same physical namespace — documented in Fase 8).
- */
+/** MySQL: pool/global → default DB; bridge → database `tenant_${slug}`; silo → database `silo_${slug}`. */
 function databaseFor(
   model: ConcreteTenancyModel | 'global',
   tenantId: string | undefined,
@@ -51,7 +48,7 @@ function databaseFor(
   if (tenantId === undefined) {
     throw new TenancyMigrateError('INVALID_OPTIONS', 'tenant id required for bridge/silo location')
   }
-  return tenantNamespace(tenantId)
+  return model === 'single-tenant' ? siloNamespace(tenantId) : tenantNamespace(tenantId)
 }
 
 function qualify(database: string, table: string): string {
@@ -155,21 +152,8 @@ async function moveTenantEntity(
   tenantId: string,
   warnings: string[],
 ): Promise<TenancyMigratedRow> {
-  // bridge↔silo on MySQL: same physical DB — warn and treat as no-op move when locations match
   const fromDb = databaseFor(step.from, tenantId, defaultDb)
   const toDb = databaseFor(step.to, tenantId, defaultDb)
-
-  if (
-    fromDb === toDb &&
-    step.from !== 'shared-db-shared-schema' &&
-    step.to !== 'shared-db-shared-schema'
-  ) {
-    warnings.push(
-      `${step.entity}/${tenantId}: MySQL bridge↔silo share database ${fromDb} (Fase 8 gap) — no physical move`,
-    )
-    const count = await countRows(connectionString, toDb, destEntity.name)
-    return { entity: step.entity, tenant: tenantId, rows: count, skipped: true }
-  }
 
   const destFilter = step.to === 'shared-db-shared-schema' ? tenantId : undefined
   const destCountBefore = await countRows(connectionString, toDb, destEntity.name, destFilter)
@@ -252,13 +236,6 @@ async function dropAfterMigrate(
   if (step.from === 'global') {
     return
   }
-  // Don't drop if bridge↔silo noop (same DB still holds the destination).
-  if (
-    (step.from === 'shared-db-isolated-schema' || step.from === 'single-tenant') &&
-    (step.to === 'shared-db-isolated-schema' || step.to === 'single-tenant')
-  ) {
-    return
-  }
   if (step.from === 'shared-db-shared-schema') {
     await dropTable(connectionString, defaultDb, step.entity)
     return
@@ -269,7 +246,7 @@ async function dropAfterMigrate(
 }
 
 /**
- * MySQL tenancy migrator. Bridge/silo share `tenant_*` DBs — physical move only for pool edges.
+ * MySQL tenancy migrator: move rows between pool/bridge/silo databases, verify, drop source.
  */
 export async function migrateMysqlTenancy(
   connectionString: string,

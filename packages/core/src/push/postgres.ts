@@ -8,7 +8,7 @@ import {
   relationsWithForeignKeys,
 } from './ddl.js'
 import { SchemaPushError } from './errors.js'
-import { assertSafeIdent, tenantNamespace } from './naming.js'
+import { assertSafeIdent, siloNamespace, tenantNamespace } from './naming.js'
 import { entitiesForModel } from './plan.js'
 import type { SchemaPushCreatedObject, SchemaPushPlan, SchemaPushResult } from './types.js'
 
@@ -245,7 +245,7 @@ export async function pushPostgresSchema(
   // --- silo: database-per-tenant ---
   if (siloEntities.length > 0) {
     for (const tenantId of plan.tenants) {
-      const databaseName = tenantNamespace(tenantId)
+      const databaseName = siloNamespace(tenantId)
       await ensureDatabase(connectionString, databaseName, created, 'single-tenant')
       const siloUrl = rewriteDatabase(connectionString, databaseName)
       await withClient(siloUrl, async (client) => {

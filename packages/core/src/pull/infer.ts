@@ -11,6 +11,7 @@ export type EntityLayoutSignals = {
   inDefaultWithoutTenantId: boolean
   inTenantSchemasWithoutTenantId: boolean
   inTenantDatabasesWithoutTenantId: boolean
+  inSiloDatabasesWithoutTenantId: boolean
   inTenantNamespaceWithTenantId: boolean
   rlsStrongSignal: boolean
   appearanceCount: number
@@ -35,6 +36,7 @@ function collectSignals(snapshot: CatalogSnapshot): EntityLayoutSignals[] {
     let inDefaultWithoutTenantId = false
     let inTenantSchemasWithoutTenantId = false
     let inTenantDatabasesWithoutTenantId = false
+    let inSiloDatabasesWithoutTenantId = false
     let inTenantNamespaceWithTenantId = false
     let rlsStrongSignal = false
     let representative: CatalogObject | undefined
@@ -68,6 +70,13 @@ function collectSignals(snapshot: CatalogSnapshot): EntityLayoutSignals[] {
           inTenantDatabasesWithoutTenantId = true
         }
         representative ??= object
+      } else if (object.namespaceKind === 'silo-database') {
+        if (hasTenantId) {
+          inTenantNamespaceWithTenantId = true
+        } else {
+          inSiloDatabasesWithoutTenantId = true
+        }
+        representative ??= object
       }
     }
 
@@ -82,6 +91,7 @@ function collectSignals(snapshot: CatalogSnapshot): EntityLayoutSignals[] {
       inDefaultWithoutTenantId,
       inTenantSchemasWithoutTenantId,
       inTenantDatabasesWithoutTenantId,
+      inSiloDatabasesWithoutTenantId,
       inTenantNamespaceWithTenantId,
       rlsStrongSignal,
       appearanceCount: appearances.length,
@@ -146,7 +156,9 @@ export function classifyEntityTenancy(
   }
 
   const hasNamespaceClone =
-    signals.inTenantSchemasWithoutTenantId || signals.inTenantDatabasesWithoutTenantId
+    signals.inTenantSchemasWithoutTenantId ||
+    signals.inTenantDatabasesWithoutTenantId ||
+    signals.inSiloDatabasesWithoutTenantId
 
   // Never assume pool solely from tenant_id when bridge/silo layout also present.
   if (signals.inDefaultWithTenantId && hasNamespaceClone) {
@@ -174,6 +186,29 @@ export function classifyEntityTenancy(
     return {
       entity: signals.entityName,
       model: 'shared-db-shared-schema',
+      signals: used,
+    }
+  }
+
+  // Silo: dedicated `silo_*` databases (distinct prefix from bridge).
+  if (signals.inSiloDatabasesWithoutTenantId) {
+    if (signals.inTenantSchemasWithoutTenantId || signals.inTenantDatabasesWithoutTenantId) {
+      if (options?.assumeTenancy !== undefined) {
+        used.push('entity in both silo_* and tenant_* namespaces (conflict)')
+        used.push(`assumeTenancy → ${options.assumeTenancy}`)
+        return {
+          entity: signals.entityName,
+          model: options.assumeTenancy,
+          signals: used,
+          fromHint: true,
+        }
+      }
+      ambiguous('entity appears in both silo_* and tenant_* namespaces', signals.entityName)
+    }
+    used.push('repeated in silo_* databases without tenant_id')
+    return {
+      entity: signals.entityName,
+      model: 'single-tenant',
       signals: used,
     }
   }
@@ -213,21 +248,13 @@ export function classifyEntityTenancy(
       }
     }
 
-    // MySQL / Mongo: DB≈namespace — cannot distinguish bridge × silo
-    if (options?.assumeTenancy !== undefined) {
-      used.push(`${dialect}: tenant_* databases without tenant_id (bridge×silo ambiguous)`)
-      used.push(`assumeTenancy → ${options.assumeTenancy}`)
-      return {
-        entity: signals.entityName,
-        model: options.assumeTenancy,
-        signals: used,
-        fromHint: true,
-      }
+    // MySQL / Mongo: silo now carries the `silo_` prefix, so tenant_* databases are bridge.
+    used.push(`${dialect}: repeated in tenant_* databases without tenant_id`)
+    return {
+      entity: signals.entityName,
+      model: 'shared-db-isolated-schema',
+      signals: used,
     }
-    ambiguous(
-      `${dialect}: tenant_* database layout does not distinguish bridge (shared-db-isolated-schema) from silo (single-tenant); pass options.assumeTenancy or entityTenancy`,
-      signals.entityName,
-    )
   }
 
   if (signals.inDefaultWithoutTenantId) {

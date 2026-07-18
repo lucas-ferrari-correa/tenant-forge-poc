@@ -148,9 +148,9 @@ describe('postgres adapter — integration (testcontainers)', () => {
     )
 
     // --- silo fixture: dedicated databases ---
-    await adminQuery(connectionString, 'CREATE DATABASE tenant_acme')
-    await adminQuery(connectionString, 'CREATE DATABASE tenant_beta')
-    for (const db of ['tenant_acme', 'tenant_beta'] as const) {
+    await adminQuery(connectionString, 'CREATE DATABASE silo_acme')
+    await adminQuery(connectionString, 'CREATE DATABASE silo_beta')
+    for (const db of ['silo_acme', 'silo_beta'] as const) {
       const url = new URL(connectionString)
       url.pathname = `/${db}`
       await adminQuery(
@@ -310,7 +310,7 @@ describe('postgres adapter — integration (testcontainers)', () => {
       })
       expect(ir.isolation).toMatchObject({
         kind: 'database-per-tenant',
-        databaseName: 'tenant_acme',
+        databaseName: 'silo_acme',
       })
 
       await adapter.execute(ir)

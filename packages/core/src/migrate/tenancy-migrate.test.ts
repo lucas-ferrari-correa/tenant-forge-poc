@@ -322,6 +322,140 @@ describe('tenancy migrate — postgres (testcontainers)', () => {
       await siloAdapter.dispose()
     }
   }, 90_000)
+
+  it('migrates bridge→silo with real data move and canary A≠B', async () => {
+    const entity = 'PgTask3'
+    const bridge = bridgeAst('pg_b2s_bridge', entity)
+    const silo = siloAst('pg_b2s_silo', entity)
+    await pushSchema(bridge, { dialect: 'postgres', connectionString }, { tenants: [...TENANTS] })
+
+    const seed = createPostgresAdapter({ connectionString })
+    try {
+      await seed.execute(
+        buildQuery(bridge, ctx('acme'), {
+          operation: 'create',
+          entity,
+          data: { id: 'b2s-a', title: 'bridge acme' },
+        }),
+      )
+      await seed.execute(
+        buildQuery(bridge, ctx('beta'), {
+          operation: 'create',
+          entity,
+          data: { id: 'b2s-b', title: 'bridge beta' },
+        }),
+      )
+    } finally {
+      await seed.dispose()
+    }
+
+    const result = await migrateTenancy(
+      silo,
+      { dialect: 'postgres', connectionString },
+      { tenants: [...TENANTS], from: bridge },
+    )
+    expect(result.steps[0]?.from).toBe('shared-db-isolated-schema')
+    expect(result.steps[0]?.to).toBe('single-tenant')
+    expect(result.migrated.filter((m) => m.rows >= 1 && !m.skipped).length).toBe(2)
+
+    // Source bridge schemas dropped after verify (real move).
+    const { Client } = await import('pg')
+    const admin = new Client({ connectionString })
+    await admin.connect()
+    try {
+      const remaining = await admin.query(
+        `SELECT tablename FROM pg_tables WHERE schemaname = 'tenant_acme' AND tablename = $1`,
+        [entity],
+      )
+      expect(remaining.rowCount).toBe(0)
+    } finally {
+      await admin.end()
+    }
+
+    const siloAdapter = createPostgresAdapter({ connectionString })
+    try {
+      const acme = await siloAdapter.execute(
+        buildQuery(silo, ctx('acme'), { operation: 'findMany', entity }),
+      )
+      const beta = await siloAdapter.execute(
+        buildQuery(silo, ctx('beta'), { operation: 'findMany', entity }),
+      )
+      expect(acme).toEqual([expect.objectContaining({ id: 'b2s-a', title: 'bridge acme' })])
+      expect(beta).toEqual([expect.objectContaining({ id: 'b2s-b', title: 'bridge beta' })])
+    } finally {
+      await siloAdapter.dispose()
+    }
+  }, 90_000)
+
+  it('throws VERIFY_FAILED on canary A≡B and preserves the source', async () => {
+    const entity = 'PgVerify'
+    const source = poolAst('pg_verify_pool', entity)
+    const target = bridgeAst('pg_verify_bridge', entity)
+
+    // Seed the source pool with a per-tenant row (distinct ids — pool PK is on id).
+    await pushSchema(source, { dialect: 'postgres', connectionString }, { tenants: [...TENANTS] })
+    const seed = createPostgresAdapter({ connectionString })
+    try {
+      await seed.execute(
+        buildQuery(source, ctx('acme'), {
+          operation: 'create',
+          entity,
+          data: { id: 'src-a', title: 'acme' },
+        }),
+      )
+      await seed.execute(
+        buildQuery(source, ctx('beta'), {
+          operation: 'create',
+          entity,
+          data: { id: 'src-b', title: 'beta' },
+        }),
+      )
+    } finally {
+      await seed.dispose()
+    }
+
+    // Pre-provision the destination and plant a shared id in both tenant schemas.
+    // The move then skips (destination already populated) and the canary sees A≡B.
+    await pushSchema(target, { dialect: 'postgres', connectionString }, { tenants: [...TENANTS] })
+    const plant = createPostgresAdapter({ connectionString })
+    try {
+      await plant.execute(
+        buildQuery(target, ctx('acme'), {
+          operation: 'create',
+          entity,
+          data: { id: 'shared', title: 'planted acme' },
+        }),
+      )
+      await plant.execute(
+        buildQuery(target, ctx('beta'), {
+          operation: 'create',
+          entity,
+          data: { id: 'shared', title: 'planted beta' },
+        }),
+      )
+    } finally {
+      await plant.dispose()
+    }
+
+    await expect(
+      migrateTenancy(
+        target,
+        { dialect: 'postgres', connectionString },
+        { tenants: [...TENANTS], from: source },
+      ),
+    ).rejects.toMatchObject({ code: 'VERIFY_FAILED' })
+
+    // Source pool table preserved: dropSource never ran.
+    const check = createPostgresAdapter({ connectionString })
+    try {
+      const acme = await check.execute(
+        buildQuery(source, ctx('acme'), { operation: 'findMany', entity }),
+      )
+      expect(acme).toEqual([expect.objectContaining({ id: 'src-a', title: 'acme' })])
+    } finally {
+      await check.dispose()
+    }
+  }, 90_000)
 })
 
 describe('tenancy migrate — mysql (testcontainers)', () => {
@@ -430,6 +564,68 @@ describe('tenancy migrate — mysql (testcontainers)', () => {
       await poolAdapter.dispose()
     }
   }, 90_000)
+
+  it('migrates bridge→silo with real data move and canary A≠B', async () => {
+    const entity = 'MyTaskSilo'
+    const bridge = bridgeAst('my_b2s_bridge', entity)
+    const silo = siloAst('my_b2s_silo', entity)
+    await pushSchema(bridge, { dialect: 'mysql', connectionString }, { tenants: [...TENANTS] })
+
+    const seed = createMysqlAdapter({ connectionString })
+    try {
+      await seed.execute(
+        buildQuery(bridge, ctx('acme'), {
+          operation: 'create',
+          entity,
+          data: { id: 'ms-a', title: 'Acme' },
+        }),
+      )
+      await seed.execute(
+        buildQuery(bridge, ctx('beta'), {
+          operation: 'create',
+          entity,
+          data: { id: 'ms-b', title: 'Beta' },
+        }),
+      )
+    } finally {
+      await seed.dispose()
+    }
+
+    const result = await migrateTenancy(
+      silo,
+      { dialect: 'mysql', connectionString },
+      { tenants: [...TENANTS], from: bridge },
+    )
+    expect(result.steps[0]?.to).toBe('single-tenant')
+    expect(result.migrated.filter((m) => m.rows >= 1 && !m.skipped).length).toBe(2)
+
+    // Source bridge database no longer holds the moved table.
+    const connection = await (await import('mysql2/promise')).createConnection(connectionString)
+    try {
+      const [rows] = await connection.query(
+        `SELECT TABLE_NAME AS name FROM information_schema.TABLES
+         WHERE TABLE_SCHEMA = 'tenant_acme' AND TABLE_NAME = ?`,
+        [entity],
+      )
+      expect((rows as Array<{ name: string }>).length).toBe(0)
+    } finally {
+      await connection.end()
+    }
+
+    const siloAdapter = createMysqlAdapter({ connectionString })
+    try {
+      const acme = await siloAdapter.execute(
+        buildQuery(silo, ctx('acme'), { operation: 'findMany', entity }),
+      )
+      const beta = await siloAdapter.execute(
+        buildQuery(silo, ctx('beta'), { operation: 'findMany', entity }),
+      )
+      expect(acme).toEqual([expect.objectContaining({ id: 'ms-a', title: 'Acme' })])
+      expect(beta).toEqual([expect.objectContaining({ id: 'ms-b', title: 'Beta' })])
+    } finally {
+      await siloAdapter.dispose()
+    }
+  }, 90_000)
 })
 
 describe('tenancy migrate — mongodb (testcontainers)', () => {
@@ -516,5 +712,65 @@ describe('tenancy migrate — mongodb (testcontainers)', () => {
       { tenants: [...TENANTS], from: target },
     )
     expect(back.steps[0]?.to).toBe('shared-db-shared-schema')
+  }, 90_000)
+
+  it('migrates bridge→silo with real data move and canary A≠B', async () => {
+    const entity = 'MoTaskSilo'
+    const bridge = bridgeAst('mo_b2s_bridge', entity)
+    const silo = siloAst('mo_b2s_silo', entity)
+    await pushSchema(bridge, { dialect: 'mongodb', connectionString }, { tenants: [...TENANTS] })
+
+    const seed = createMongodbAdapter({ connectionString })
+    try {
+      await seed.execute(
+        buildQuery(bridge, ctx('acme'), {
+          operation: 'create',
+          entity,
+          data: { id: 'mos-a', title: 'Acme' },
+        }),
+      )
+      await seed.execute(
+        buildQuery(bridge, ctx('beta'), {
+          operation: 'create',
+          entity,
+          data: { id: 'mos-b', title: 'Beta' },
+        }),
+      )
+    } finally {
+      await seed.dispose()
+    }
+
+    const result = await migrateTenancy(
+      silo,
+      { dialect: 'mongodb', connectionString },
+      { tenants: [...TENANTS], from: bridge },
+    )
+    expect(result.steps[0]?.to).toBe('single-tenant')
+    expect(result.migrated.filter((m) => m.rows >= 1 && !m.skipped).length).toBe(2)
+
+    // Source bridge database no longer holds the moved collection.
+    const { MongoClient } = await import('mongodb')
+    const client = new MongoClient(connectionString)
+    await client.connect()
+    try {
+      const remaining = await client.db('tenant_acme').listCollections({ name: entity }).toArray()
+      expect(remaining.length).toBe(0)
+    } finally {
+      await client.close()
+    }
+
+    const siloAdapter = createMongodbAdapter({ connectionString })
+    try {
+      const acme = await siloAdapter.execute(
+        buildQuery(silo, ctx('acme'), { operation: 'findMany', entity }),
+      )
+      const beta = await siloAdapter.execute(
+        buildQuery(silo, ctx('beta'), { operation: 'findMany', entity }),
+      )
+      expect(acme).toEqual([expect.objectContaining({ id: 'mos-a', title: 'Acme' })])
+      expect(beta).toEqual([expect.objectContaining({ id: 'mos-b', title: 'Beta' })])
+    } finally {
+      await siloAdapter.dispose()
+    }
   }, 90_000)
 })

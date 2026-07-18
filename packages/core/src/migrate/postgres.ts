@@ -5,7 +5,7 @@ import { TENANT_ID_FIELD_NAME } from '../ast/tenancy.js'
 import { createTenantContext } from '../ast/tenant-context.js'
 import type { EntityDefinition, SchemaAst } from '../ast/types.js'
 import { quoteSqlIdent } from '../push/ddl.js'
-import { tenantNamespace } from '../push/naming.js'
+import { siloNamespace, tenantNamespace } from '../push/naming.js'
 import { buildQuery } from '../query/build.js'
 import { TenancyMigrateError } from './errors.js'
 import { destinationFieldNames, projectRow, sourceFieldNames } from './rows.js'
@@ -63,11 +63,10 @@ function locationFor(
   if (tenantId === undefined) {
     throw new TenancyMigrateError('INVALID_OPTIONS', 'tenant id required for bridge/silo location')
   }
-  const ns = tenantNamespace(tenantId)
   if (model === 'shared-db-isolated-schema') {
-    return { kind: 'bridge', schema: ns }
+    return { kind: 'bridge', schema: tenantNamespace(tenantId) }
   }
-  return { kind: 'silo', database: ns }
+  return { kind: 'silo', database: siloNamespace(tenantId) }
 }
 
 function connectionFor(base: string, loc: Location): string {

@@ -24,9 +24,13 @@ export type SchemaPullOptions = {
    */
   entityTenancy?: Record<string, ConcreteTenancyModel | 'global'>
   /**
-   * Regex for tenant namespaces (`tenant_${slug}`). Default: `/^tenant_/`.
+   * Regex for bridge namespaces (`tenant_${slug}`). Default: `/^tenant_/`.
    */
   tenantNamespacePattern?: RegExp
+  /**
+   * Regex for silo databases (`silo_${slug}`). Default: `/^silo_/`.
+   */
+  siloNamespacePattern?: RegExp
   /** Schema AST name when introspected (default: `pulled`). */
   schemaName?: string
   /** Postgres RLS GUC expected in policies (default: `app.current_tenant_id`). */

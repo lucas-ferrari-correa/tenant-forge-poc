@@ -12,9 +12,14 @@ export function sanitizeTenantIdentifier(tenantId: string): string {
   return sanitized.length > 0 ? sanitized : 'tenant'
 }
 
-/** Bridge / silo namespace: `tenant_${slug}` — same convention as IsolationStrategy. */
+/** Bridge namespace: `tenant_${slug}` — schema (Postgres) or database (MySQL/Mongo). */
 export function tenantNamespace(tenantId: string): string {
   return `tenant_${sanitizeTenantIdentifier(tenantId)}`
+}
+
+/** Silo namespace: `silo_${slug}` — dedicated database, distinct from bridge in all dialects. */
+export function siloNamespace(tenantId: string): string {
+  return `silo_${sanitizeTenantIdentifier(tenantId)}`
 }
 
 export function assertSafeIdent(name: string): string {

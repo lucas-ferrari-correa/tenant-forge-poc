@@ -1,6 +1,6 @@
 /** Intermediate catalog from dialect introspection — input to tenancy inference + AST build. */
 
-export type CatalogNamespaceKind = 'default' | 'tenant-schema' | 'tenant-database'
+export type CatalogNamespaceKind = 'default' | 'tenant-schema' | 'tenant-database' | 'silo-database'
 
 export type CatalogColumn = {
   name: string
@@ -42,6 +42,9 @@ export type CatalogSnapshot = {
 }
 
 export const DEFAULT_TENANT_NAMESPACE_PATTERN = /^tenant_/
+
+/** Silo databases carry a dedicated prefix, distinct from bridge (`tenant_`). */
+export const DEFAULT_SILO_NAMESPACE_PATTERN = /^silo_/
 
 export function isTenantNamespace(name: string, pattern: RegExp): boolean {
   return pattern.test(name)

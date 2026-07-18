@@ -5,6 +5,7 @@ export {
   type CatalogNamespaceKind,
   type CatalogObject,
   type CatalogSnapshot,
+  DEFAULT_SILO_NAMESPACE_PATTERN,
   DEFAULT_TENANT_NAMESPACE_PATTERN,
   hasTenantIdColumn,
   isTenantNamespace,

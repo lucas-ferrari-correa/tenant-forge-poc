@@ -156,7 +156,7 @@ describe('queryBuilder — four concrete models', () => {
     expect(ir.isolation).toEqual({
       kind: 'database-per-tenant',
       tenantId: 'enterprise-1',
-      databaseName: 'tenant_enterprise_1',
+      databaseName: 'silo_enterprise_1',
       mongo: { databasePerTenant: true },
     })
     expect(ir.where).toEqual({ id: '9' })

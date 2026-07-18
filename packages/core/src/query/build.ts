@@ -97,7 +97,7 @@ function buildIsolation(model: ConcreteTenancyModel, tenantId: string): Isolatio
     return {
       kind: 'database-per-tenant',
       tenantId,
-      databaseName: `tenant_${slug}`,
+      databaseName: `silo_${slug}`,
       mongo: { databasePerTenant: true },
     }
   }

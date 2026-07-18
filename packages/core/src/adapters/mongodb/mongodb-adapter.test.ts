@@ -262,10 +262,10 @@ describe('mongodb adapter — integration (testcontainers)', () => {
 
   describe('silo (single-tenant / database-per-tenant)', () => {
     beforeAll(async () => {
-      // Reuse bridge DBs (`tenant_*`); clear so silo canary asserts stay exact.
+      // Silo uses dedicated `silo_*` databases (created on first write); clear for exact canary asserts.
       await withAdmin(connectionString, async (client) => {
-        await client.db('tenant_acme').collection('Task').deleteMany({})
-        await client.db('tenant_beta').collection('Task').deleteMany({})
+        await client.db('silo_acme').collection('Task').deleteMany({})
+        await client.db('silo_beta').collection('Task').deleteMany({})
       })
     })
 
@@ -277,7 +277,7 @@ describe('mongodb adapter — integration (testcontainers)', () => {
       })
       expect(ir.isolation).toMatchObject({
         kind: 'database-per-tenant',
-        databaseName: 'tenant_acme',
+        databaseName: 'silo_acme',
         mongo: { databasePerTenant: true },
       })
 

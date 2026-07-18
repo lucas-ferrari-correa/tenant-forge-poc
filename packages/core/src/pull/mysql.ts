@@ -3,6 +3,7 @@ import {
   type CatalogForeignKey,
   type CatalogObject,
   type CatalogSnapshot,
+  DEFAULT_SILO_NAMESPACE_PATTERN,
   DEFAULT_TENANT_NAMESPACE_PATTERN,
   isTenantNamespace,
 } from './catalog.js'
@@ -32,15 +33,19 @@ function defaultDatabaseFromUri(connectionString: string): string {
 async function listDatabases(
   connection: mysql.Connection,
   pattern: RegExp,
+  siloPattern: RegExp,
   defaultDb: string,
-): Promise<{ tenant: string[]; allUser: string[] }> {
+): Promise<{ tenant: string[]; silo: string[]; allUser: string[] }> {
   const [rows] = await connection.query<mysql.RowDataPacket[]>('SHOW DATABASES')
   const names = (rows as Array<{ Database: string }>).map((row) => row.Database)
   const allUser = names.filter((name) => !SYSTEM_DATABASES.has(name))
   const tenant = allUser
     .filter((name) => isTenantNamespace(name, pattern) && name !== defaultDb)
     .sort()
-  return { tenant, allUser }
+  const silo = allUser
+    .filter((name) => isTenantNamespace(name, siloPattern) && name !== defaultDb)
+    .sort()
+  return { tenant, silo, allUser }
 }
 
 async function loadColumns(
@@ -155,18 +160,24 @@ async function introspectDatabaseTables(
 
 /**
  * Introspect MySQL: default DB + tenant_* databases.
- * Bridge×silo share DB≈namespace — inference requires assumeTenancy/entityTenancy.
+ * Bridge → tenant_* databases; silo → silo_* databases (distinct prefixes).
  */
 export async function introspectMysqlCatalog(
   connectionString: string,
   options?: SchemaPullOptions,
 ): Promise<CatalogSnapshot> {
   const pattern = options?.tenantNamespacePattern ?? DEFAULT_TENANT_NAMESPACE_PATTERN
+  const siloPattern = options?.siloNamespacePattern ?? DEFAULT_SILO_NAMESPACE_PATTERN
   const defaultNamespace = defaultDatabaseFromUri(connectionString)
 
   try {
     return await withConnection(connectionString, async (connection) => {
-      const { tenant: tenantDatabases } = await listDatabases(connection, pattern, defaultNamespace)
+      const { tenant: tenantDatabases, silo: siloDatabases } = await listDatabases(
+        connection,
+        pattern,
+        siloPattern,
+        defaultNamespace,
+      )
 
       const objects: CatalogObject[] = []
       objects.push(...(await introspectDatabaseTables(connection, defaultNamespace, 'default')))
@@ -176,13 +187,16 @@ export async function introspectMysqlCatalog(
           ...(await introspectDatabaseTables(connection, databaseName, 'tenant-database')),
         )
       }
+      for (const databaseName of siloDatabases) {
+        objects.push(...(await introspectDatabaseTables(connection, databaseName, 'silo-database')))
+      }
 
       return {
         dialect: 'mysql',
         defaultNamespace,
         objects,
         tenantSchemas: [],
-        tenantDatabases,
+        tenantDatabases: [...tenantDatabases, ...siloDatabases],
       }
     })
   } catch (error) {

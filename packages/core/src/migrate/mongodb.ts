@@ -4,7 +4,7 @@ import type { ConcreteTenancyModel } from '../ast/tenancy.js'
 import { TENANT_ID_FIELD_NAME } from '../ast/tenancy.js'
 import { createTenantContext } from '../ast/tenant-context.js'
 import type { EntityDefinition, SchemaAst } from '../ast/types.js'
-import { tenantNamespace } from '../push/naming.js'
+import { siloNamespace, tenantNamespace } from '../push/naming.js'
 import { buildQuery } from '../query/build.js'
 import { TenancyMigrateError } from './errors.js'
 import { destinationFieldNames, projectRow } from './rows.js'
@@ -24,7 +24,7 @@ function findEntity(ast: SchemaAst, name: string): EntityDefinition {
   return entity
 }
 
-/** Mongo: pool/global → default DB; bridge AND silo → `tenant_${slug}` (same gap as MySQL). */
+/** Mongo: pool/global → default DB; bridge → `tenant_${slug}`; silo → `silo_${slug}`. */
 function databaseFor(
   model: ConcreteTenancyModel | 'global',
   tenantId: string | undefined,
@@ -36,7 +36,7 @@ function databaseFor(
   if (tenantId === undefined) {
     throw new TenancyMigrateError('INVALID_OPTIONS', 'tenant id required for bridge/silo location')
   }
-  return tenantNamespace(tenantId)
+  return model === 'single-tenant' ? siloNamespace(tenantId) : tenantNamespace(tenantId)
 }
 
 async function withClient<T>(
@@ -124,18 +124,6 @@ async function moveTenantEntity(
   const fromDb = databaseFor(step.from, tenantId, defaultDb)
   const toDb = databaseFor(step.to, tenantId, defaultDb)
 
-  if (
-    fromDb === toDb &&
-    step.from !== 'shared-db-shared-schema' &&
-    step.to !== 'shared-db-shared-schema'
-  ) {
-    warnings.push(
-      `${step.entity}/${tenantId}: Mongo bridge↔silo share database ${fromDb} (Fase 8 gap) — no physical move`,
-    )
-    const count = await countDocs(client, toDb, destEntity.name)
-    return { entity: step.entity, tenant: tenantId, rows: count, skipped: true }
-  }
-
   const destFilter =
     step.to === 'shared-db-shared-schema' ? { [TENANT_ID_FIELD_NAME]: tenantId } : {}
   const destCountBefore = await countDocs(client, toDb, destEntity.name, destFilter)
@@ -219,12 +207,6 @@ async function dropAfterMigrate(
   if (step.from === 'global') {
     return
   }
-  if (
-    (step.from === 'shared-db-isolated-schema' || step.from === 'single-tenant') &&
-    (step.to === 'shared-db-isolated-schema' || step.to === 'single-tenant')
-  ) {
-    return
-  }
   if (step.from === 'shared-db-shared-schema') {
     await dropCollection(client, defaultDb, step.entity)
     return
@@ -235,7 +217,7 @@ async function dropAfterMigrate(
 }
 
 /**
- * MongoDB tenancy migrator. Bridge/silo share `tenant_*` DBs — physical move only for pool edges.
+ * MongoDB tenancy migrator: move docs between pool/bridge/silo databases, verify, drop source.
  */
 export async function migrateMongodbTenancy(
   connectionString: string,

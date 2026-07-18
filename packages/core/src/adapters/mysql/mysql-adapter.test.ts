@@ -159,8 +159,27 @@ describe('mysql adapter — integration (testcontainers)', () => {
       `,
     )
 
-    // Silo reuses the same DB names as bridge (`tenant_${slug}` — MySQL database ≈ schema).
-    // Tables are truncated in the silo describe so canary asserts stay exact.
+    // --- silo fixture: dedicated databases (`silo_${slug}`, distinct from bridge) ---
+    await adminQuery(connectionString, 'CREATE DATABASE `silo_acme`')
+    await adminQuery(connectionString, 'CREATE DATABASE `silo_beta`')
+    await adminQuery(
+      connectionString,
+      `
+      CREATE TABLE \`silo_acme\`.\`Task\` (
+        id VARCHAR(64) PRIMARY KEY,
+        title VARCHAR(255) NOT NULL
+      )
+      `,
+    )
+    await adminQuery(
+      connectionString,
+      `
+      CREATE TABLE \`silo_beta\`.\`Task\` (
+        id VARCHAR(64) PRIMARY KEY,
+        title VARCHAR(255) NOT NULL
+      )
+      `,
+    )
 
     // --- global fixture ---
     await adminQuery(
@@ -299,8 +318,8 @@ describe('mysql adapter — integration (testcontainers)', () => {
 
   describe('silo (single-tenant / database-per-tenant)', () => {
     beforeAll(async () => {
-      await adminQuery(connectionString, 'TRUNCATE TABLE `tenant_acme`.`Task`')
-      await adminQuery(connectionString, 'TRUNCATE TABLE `tenant_beta`.`Task`')
+      await adminQuery(connectionString, 'TRUNCATE TABLE `silo_acme`.`Task`')
+      await adminQuery(connectionString, 'TRUNCATE TABLE `silo_beta`.`Task`')
     })
 
     it('routes to isolation.databaseName and keeps tenants apart', async () => {
@@ -311,7 +330,7 @@ describe('mysql adapter — integration (testcontainers)', () => {
       })
       expect(ir.isolation).toMatchObject({
         kind: 'database-per-tenant',
-        databaseName: 'tenant_acme',
+        databaseName: 'silo_acme',
       })
 
       await adapter.execute(ir)
