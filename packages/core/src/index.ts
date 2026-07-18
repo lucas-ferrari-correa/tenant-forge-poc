@@ -5,6 +5,7 @@ export function coreVersion(): string {
   return '0.0.0'
 }
 
+export * from './adapters/index.js'
 export * from './ast/index.js'
 export { CONTAINER_IMAGES, type SupportedDatabase } from './containers.js'
 export * from './dsl/index.js'
