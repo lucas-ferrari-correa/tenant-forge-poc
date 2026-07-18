@@ -1,4 +1,18 @@
 export {
+  assertSafeIdent as assertMongodbSafeIdent,
+  type CreateMongodbAdapterOptions,
+  compileQueryIr as compileMongodbQueryIr,
+  createMongodbAdapter,
+  type MongodbAdapter,
+  MongodbAdapterError,
+  type MongodbAdapterErrorCode,
+  type MongodbCompiledOp,
+  type MongodbExecuteResult,
+  type MongodbRow,
+  resolveDatabaseName as resolveMongodbDatabaseName,
+} from './mongodb/index.js'
+
+export {
   type CreateMysqlAdapterOptions,
   compileQueryIr as compileMysqlQueryIr,
   compileSelectByRecord as compileMysqlSelectByRecord,
