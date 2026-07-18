@@ -1,4 +1,4 @@
-/** Engine package — AST is the in-memory source of truth; DSL projects to/from it. */
+/** Engine package — AST is the in-memory source of truth; DSL/query project from it. */
 export const CORE_PACKAGE = '@tenant-forge/core' as const
 
 export function coreVersion(): string {
@@ -8,3 +8,4 @@ export function coreVersion(): string {
 export * from './ast/index.js'
 export { CONTAINER_IMAGES, type SupportedDatabase } from './containers.js'
 export * from './dsl/index.js'
+export * from './query/index.js'
