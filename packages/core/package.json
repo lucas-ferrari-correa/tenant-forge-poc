@@ -20,6 +20,7 @@
     "test": "vitest run --dir src"
   },
   "dependencies": {
+    "mysql2": "^3.23.0",
     "pg": "^8.22.0",
     "testcontainers": "^11.5.1"
   },
